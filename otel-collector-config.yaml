@@ -47,6 +47,8 @@ exporters:
     api:
       site: datad0g.com
       key: ${DD_API_KEY}
+    host_metadata:
+      enabled: false
 
   # Debug exporter for troubleshooting
   debug:
