@@ -1,0 +1,84 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  # Prometheus receiver to scrape metrics from the sample app
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'sample-app'
+          scrape_interval: 15s
+          static_configs:
+            - targets: ['localhost:8080']
+
+processors:
+  # Resource processor to add additional attributes
+  resource:
+    attributes:
+      - key: deployment.environment
+        value: "kubernetes"
+        action: upsert
+      - key: service.namespace
+        value: "default"
+        action: upsert
+
+  # Batch processor for better performance
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+    send_batch_max_size: 2048
+
+  # Memory limiter to prevent OOM
+  memory_limiter:
+    limit_mib: 400
+    check_interval: 1s
+
+connectors:
+  # Datadog connector for enrichment and metric generation
+  datadog/connector:
+    
+exporters:
+  # Datadog exporter for traces
+  datadog:
+    api:
+      site: datad0g.com
+      key: ${DD_API_KEY}
+
+  # Debug exporter for troubleshooting
+  debug:
+    verbosity: basic
+
+extensions:
+  health_check:
+
+service:
+  pipelines:
+    # Traces pipeline
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [datadog, datadog/connector, debug]
+    
+    # Metrics pipeline
+    metrics:
+      receivers: [otlp, prometheus, datadog/connector]
+      processors: [memory_limiter, resource, batch]
+      exporters: [datadog, debug]
+    
+    # Logs pipeline
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [datadog, debug]
+
+  extensions: [health_check]
+  
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      level: basic 

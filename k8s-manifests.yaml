@@ -1,0 +1,264 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: default
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+      # Prometheus receiver to scrape metrics from the sample app
+      prometheus:
+        config:
+          scrape_configs:
+            - job_name: 'sample-app'
+              scrape_interval: 15s
+              static_configs:
+                - targets: ['localhost:8080']
+
+    processors:
+      # Resource processor to add additional attributes
+      resource:
+        attributes:
+          - key: deployment.environment
+            value: "kubernetes"
+            action: upsert
+          - key: service.namespace
+            value: "default"
+            action: upsert
+
+      # Batch processor for better performance
+      batch:
+        timeout: 1s
+        send_batch_size: 1024
+        send_batch_max_size: 2048
+
+      # Memory limiter to prevent OOM (set to 80% of container limit)
+      memory_limiter:
+        limit_mib: 320  # 80% of 400Mi container limit
+        check_interval: 1s
+
+    connectors:
+      # Datadog connector for enrichment and metric generation
+      datadog/connector:
+        
+    exporters:
+      # Datadog exporter for traces
+      datadog:
+        api:
+          site: datad0g.com
+          key: ${DD_API_KEY}
+
+      # Debug exporter for troubleshooting
+      debug:
+        verbosity: basic
+
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+
+    service:
+      pipelines:
+        # Traces pipeline
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, resource, batch]
+          exporters: [datadog, datadog/connector, debug]
+        
+        # Metrics pipeline
+        metrics:
+          receivers: [otlp, prometheus, datadog/connector]
+          processors: [memory_limiter, resource, batch]
+          exporters: [datadog, debug]
+        
+        # Logs pipeline
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, resource, batch]
+          exporters: [datadog, debug]
+
+      extensions: [health_check]
+      
+      telemetry:
+        logs:
+          level: info
+        metrics:
+          level: basic
+
+# Note: datadog-api-key Secret will be created by deploy.sh script
+# This ensures the API key is not hardcoded in version control
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sample-app-deployment
+  namespace: default
+  labels:
+    app: sample-app
+spec:
+  replicas: 3  # Multiple pods for load distribution
+  selector:
+    matchLabels:
+      app: sample-app
+  template:
+    metadata:
+      labels:
+        app: sample-app
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      # Main application container
+      - name: sample-app
+        image: sample-app:latest
+        imagePullPolicy: Never  # For local development
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: PORT
+          value: "8080"
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "http://localhost:4318"
+        - name: OTEL_SERVICE_NAME
+          value: "sample-app"
+        - name: OTEL_SERVICE_VERSION
+          value: "1.0.0"
+        - name: OTEL_RESOURCE_ATTRIBUTES
+          value: "deployment.environment=kubernetes,service.namespace=default"
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+
+      # OpenTelemetry Collector sidecar
+      - name: otel-collector
+        image: otel/opentelemetry-collector-contrib:latest
+        command:
+        - /otelcol-contrib
+        - --config=/etc/otel-collector/config.yaml
+        ports:
+        - containerPort: 4317
+          name: otlp-grpc
+        - containerPort: 4318
+          name: otlp-http
+        - containerPort: 13133
+          name: health
+        env:
+        - name: DD_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: datadog-api-key
+              key: api-key
+        volumeMounts:
+        - name: otel-collector-config
+          mountPath: /etc/otel-collector
+          readOnly: true
+        resources:
+          requests:
+            memory: "200Mi"
+            cpu: "100m"
+          limits:
+            memory: "400Mi"
+            cpu: "200m"
+        # Startup probe for slow-starting collector
+        startupProbe:
+          httpGet:
+            path: /
+            port: 13133
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 12  # 60 seconds total startup time
+        # Liveness probe with generous settings
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 13133
+          initialDelaySeconds: 30  # Start checking after startup probe succeeds
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        # Readiness probe to determine when ready to receive traffic
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 13133
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+
+      volumes:
+      - name: otel-collector-config
+        configMap:
+          name: otel-collector-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sample-app-service
+  namespace: default
+  labels:
+    app: sample-app
+spec:
+  selector:
+    app: sample-app
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+    protocol: TCP
+  - name: otlp-grpc
+    port: 4317
+    targetPort: 4317
+    protocol: TCP
+  - name: otlp-http
+    port: 4318
+    targetPort: 4318
+    protocol: TCP
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sample-app-loadbalancer
+  namespace: default
+  labels:
+    app: sample-app
+spec:
+  selector:
+    app: sample-app
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+    protocol: TCP
+  type: LoadBalancer 
