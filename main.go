@@ -39,6 +39,7 @@ func initTelemetry() error {
 			semconv.ServiceName("sample-app"),
 			semconv.ServiceVersion("1.0.0"),
 			semconv.DeploymentEnvironment("kubernetes"),
+			semconv.K8SNodeName("meli-otel-test-control-plane"),
 		),
 	)
 	if err != nil {

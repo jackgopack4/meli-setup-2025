@@ -314,6 +314,71 @@ func TestInitTelemetryWithoutExporter(t *testing.T) {
 	}
 }
 
+func TestResourceAttributes(t *testing.T) {
+	// Test that resource attributes are correctly set including K8S cluster name
+	ctx := context.Background()
+
+	res, err := resource.New(ctx,
+		resource.WithAttributes(
+			semconv.ServiceName("sample-app"),
+			semconv.ServiceVersion("1.0.0"),
+			semconv.DeploymentEnvironment("kubernetes"),
+			semconv.K8SNodeName("meli-otel-test-control-plane"),
+		),
+	)
+	if err != nil {
+		t.Fatalf("Failed to create resource: %v", err)
+	}
+
+	// Verify expected attributes are present
+	attrs := res.Attributes()
+
+	tests := []struct {
+		name     string
+		key      string
+		expected string
+	}{
+		{
+			name:     "service name",
+			key:      string(semconv.ServiceNameKey),
+			expected: "sample-app",
+		},
+		{
+			name:     "service version",
+			key:      string(semconv.ServiceVersionKey),
+			expected: "1.0.0",
+		},
+		{
+			name:     "deployment environment",
+			key:      string(semconv.DeploymentEnvironmentKey),
+			expected: "kubernetes",
+		},
+		{
+			name:     "k8s cluster name",
+			key:      string(semconv.K8SClusterNameKey),
+			expected: "kind-meli-otel-test",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			found := false
+			for _, attr := range attrs {
+				if string(attr.Key) == tt.key {
+					if attr.Value.AsString() != tt.expected {
+						t.Errorf("Expected %s to be %q, got %q", tt.name, tt.expected, attr.Value.AsString())
+					}
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("Expected attribute %s (%s) not found in resource", tt.name, tt.key)
+			}
+		})
+	}
+}
+
 func BenchmarkHealthHandler(b *testing.B) {
 	if err := setupTestTelemetry(); err != nil {
 		b.Fatalf("Failed to setup test telemetry: %v", err)
