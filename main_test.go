@@ -315,7 +315,8 @@ func TestInitTelemetryWithoutExporter(t *testing.T) {
 }
 
 func TestResourceAttributes(t *testing.T) {
-	// Test that resource attributes are correctly set including K8S cluster name
+	// Test that resource attributes are correctly set
+	// Note: In the actual application, K8S node name is detected by the resourcedetection processor
 	ctx := context.Background()
 
 	res, err := resource.New(ctx,
@@ -323,7 +324,6 @@ func TestResourceAttributes(t *testing.T) {
 			semconv.ServiceName("sample-app"),
 			semconv.ServiceVersion("1.0.0"),
 			semconv.DeploymentEnvironment("kubernetes"),
-			semconv.K8SNodeName("meli-otel-test-control-plane"),
 		),
 	)
 	if err != nil {
@@ -332,6 +332,12 @@ func TestResourceAttributes(t *testing.T) {
 
 	// Verify expected attributes are present
 	attrs := res.Attributes()
+
+	// Debug: Print all attributes
+	t.Logf("Resource has %d attributes:", len(attrs))
+	for _, attr := range attrs {
+		t.Logf("  - %s = %s", attr.Key, attr.Value.AsString())
+	}
 
 	tests := []struct {
 		name     string
@@ -352,11 +358,6 @@ func TestResourceAttributes(t *testing.T) {
 			name:     "deployment environment",
 			key:      string(semconv.DeploymentEnvironmentKey),
 			expected: "kubernetes",
-		},
-		{
-			name:     "k8s cluster name",
-			key:      string(semconv.K8SClusterNameKey),
-			expected: "kind-meli-otel-test",
 		},
 	}
 

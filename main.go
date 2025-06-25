@@ -34,12 +34,13 @@ func initTelemetry() error {
 	ctx := context.Background()
 
 	// Create resource
+	// Note: K8S node name and other Kubernetes metadata are automatically detected
+	// by the resourcedetection processor in the OpenTelemetry Collector
 	res, err := resource.New(ctx,
 		resource.WithAttributes(
 			semconv.ServiceName("sample-app"),
 			semconv.ServiceVersion("1.0.0"),
 			semconv.DeploymentEnvironment("kubernetes"),
-			semconv.K8SNodeName("meli-otel-test-control-plane"),
 		),
 	)
 	if err != nil {

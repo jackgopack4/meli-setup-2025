@@ -24,6 +24,12 @@ data:
                 - targets: ['localhost:8080']
 
     processors:
+      # Resource detection processor to auto-detect Kubernetes metadata
+      resourcedetection:
+        detectors: [env, k8snode]
+        k8snode:
+          node_from_env_var: K8s_NODE_NAME
+
       # Resource processor to add additional attributes
       resource:
         attributes:
@@ -32,6 +38,9 @@ data:
             action: upsert
           - key: service.namespace
             value: "default"
+            action: upsert
+          - key: datadog.host.use_as_metadata
+            value: true
             action: upsert
 
       # Batch processor for better performance
@@ -71,19 +80,19 @@ data:
         # Traces pipeline
         traces:
           receivers: [otlp]
-          processors: [memory_limiter, resource, batch]
+          processors: [memory_limiter, resourcedetection, resource, batch]
           exporters: [datadog, datadog/connector, debug]
         
         # Metrics pipeline
         metrics:
           receivers: [otlp, prometheus, datadog/connector]
-          processors: [memory_limiter, resource, batch]
+          processors: [memory_limiter, resourcedetection, resource, batch]
           exporters: [datadog, debug]
         
         # Logs pipeline
         logs:
           receivers: [otlp]
-          processors: [memory_limiter, resource, batch]
+          processors: [memory_limiter, resourcedetection, resource, batch]
           exporters: [datadog, debug]
 
       extensions: [health_check]
@@ -96,6 +105,40 @@ data:
 
 # Note: datadog-api-key Secret will be created by deploy.sh script
 # This ensures the API key is not hardcoded in version control
+
+---
+# ServiceAccount for OpenTelemetry Collector
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: otel-collector
+  namespace: default
+
+---
+# ClusterRole with permissions to read nodes for k8snode detector
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: otel-collector
+rules:
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "list", "watch"]
+
+---
+# ClusterRoleBinding to bind the role to the service account
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: otel-collector
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: otel-collector
+subjects:
+- kind: ServiceAccount
+  name: otel-collector
+  namespace: default
 
 ---
 apiVersion: apps/v1
@@ -119,6 +162,7 @@ spec:
         prometheus.io/port: "8080"
         prometheus.io/path: "/metrics"
     spec:
+      serviceAccountName: otel-collector
       containers:
       # Main application container
       - name: sample-app
@@ -177,6 +221,10 @@ spec:
             secretKeyRef:
               name: datadog-api-key
               key: api-key
+        - name: K8s_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
         volumeMounts:
         - name: otel-collector-config
           mountPath: /etc/otel-collector

@@ -16,6 +16,12 @@ receivers:
             - targets: ['localhost:8080']
 
 processors:
+  # Resource detection processor to auto-detect Kubernetes metadata
+  resourcedetection:
+    detectors: [env, k8snode]
+    k8snode:
+      node_from_env_var: K8s_NODE_NAME
+
   # Resource processor to add additional attributes
   resource:
     attributes:
@@ -24,6 +30,9 @@ processors:
         action: upsert
       - key: service.namespace
         value: "default"
+        action: upsert
+      - key: datadog.host.use_as_metadata
+        value: true
         action: upsert
 
   # Batch processor for better performance
@@ -62,19 +71,19 @@ service:
     # Traces pipeline
     traces:
       receivers: [otlp]
-      processors: [memory_limiter, resource, batch]
+      processors: [memory_limiter, resourcedetection, resource, batch]
       exporters: [datadog, datadog/connector, debug]
     
     # Metrics pipeline
     metrics:
       receivers: [otlp, prometheus, datadog/connector]
-      processors: [memory_limiter, resource, batch]
+      processors: [memory_limiter, resourcedetection, resource, batch]
       exporters: [datadog, debug]
     
     # Logs pipeline
     logs:
       receivers: [otlp]
-      processors: [memory_limiter, resource, batch]
+      processors: [memory_limiter, resourcedetection, resource, batch]
       exporters: [datadog, debug]
 
   extensions: [health_check]
