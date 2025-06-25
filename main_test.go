@@ -333,12 +333,6 @@ func TestResourceAttributes(t *testing.T) {
 	// Verify expected attributes are present
 	attrs := res.Attributes()
 
-	// Debug: Print all attributes
-	t.Logf("Resource has %d attributes:", len(attrs))
-	for _, attr := range attrs {
-		t.Logf("  - %s = %s", attr.Key, attr.Value.AsString())
-	}
-
 	tests := []struct {
 		name     string
 		key      string
