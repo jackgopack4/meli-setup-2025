@@ -39,9 +39,9 @@ data:
           - key: service.namespace
             value: "default"
             action: upsert
-          - key: datadog.host.use_as_metadata
-            value: true
-            action: upsert
+          # - key: datadog.host.use_as_metadata
+          #   value: true
+          #   action: upsert
 
       # Batch processor for better performance
       batch:
@@ -69,7 +69,7 @@ data:
 
       # Debug exporter for troubleshooting
       debug:
-        verbosity: basic
+        verbosity: detailed
 
     extensions:
       health_check:
@@ -100,8 +100,8 @@ data:
       telemetry:
         logs:
           level: info
-        metrics:
-          level: basic
+        # metrics:
+        #   level: basic
 
 # Note: datadog-api-key Secret will be created by deploy.sh script
 # This ensures the API key is not hardcoded in version control

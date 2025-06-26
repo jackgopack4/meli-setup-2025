@@ -2,6 +2,28 @@
 
 set -e
 
+# Parse command line arguments
+SKIP_API_KEY=false
+
+while getopts "Nh" opt; do
+    case $opt in
+        N)
+            SKIP_API_KEY=true
+            ;;
+        h)
+            echo "Usage: $0 [-N] [-h]"
+            echo "  -N    Skip updating Datadog API key"
+            echo "  -h    Show this help message"
+            exit 0
+            ;;
+        \?)
+            echo "Invalid option: -$OPTARG" >&2
+            echo "Use -h for help"
+            exit 1
+            ;;
+    esac
+done
+
 echo "🚀 Deploying Kubernetes OpenTelemetry Setup with Datadog"
 
 # Colors for output
@@ -60,40 +82,52 @@ else
 fi
 
 # Handle Datadog API Key
-print_status "Configuring Datadog API key..."
-
-# Check if the secret already exists
-if kubectl get secret datadog-api-key -n default &> /dev/null; then
-    print_status "Datadog API key secret already exists"
-    read -p "Do you want to update it? (y/N): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        kubectl delete secret datadog-api-key -n default
-        CREATE_SECRET=true
+if [[ $SKIP_API_KEY == true ]]; then
+    print_status "Skipping Datadog API key configuration (using -N flag)"
+    
+    # Check if the secret exists
+    if ! kubectl get secret datadog-api-key -n default &> /dev/null; then
+        print_warning "Datadog API key secret does not exist and -N flag was used"
+        print_warning "The deployment may fail. Create the secret manually or run without -N flag"
     else
-        CREATE_SECRET=false
+        print_status "Using existing Datadog API key secret"
     fi
 else
-    CREATE_SECRET=true
-fi
+    print_status "Configuring Datadog API key..."
 
-if [[ $CREATE_SECRET == true ]]; then
-    # Prompt for API key
-    echo -n "Enter your Datadog API key: "
-    read -s DD_API_KEY
-    echo
-    
-    if [[ -z "$DD_API_KEY" ]]; then
-        print_error "Datadog API key is required"
-        exit 1
+    # Check if the secret already exists
+    if kubectl get secret datadog-api-key -n default &> /dev/null; then
+        print_status "Datadog API key secret already exists"
+        read -p "Do you want to update it? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            kubectl delete secret datadog-api-key -n default
+            CREATE_SECRET=true
+        else
+            CREATE_SECRET=false
+        fi
+    else
+        CREATE_SECRET=true
     fi
-    
-    # Create the secret
-    kubectl create secret generic datadog-api-key \
-        --from-literal=api-key="$DD_API_KEY" \
-        --namespace=default
-    
-    print_status "Datadog API key secret created successfully"
+
+    if [[ $CREATE_SECRET == true ]]; then
+        # Prompt for API key
+        echo -n "Enter your Datadog API key: "
+        read -s DD_API_KEY
+        echo
+        
+        if [[ -z "$DD_API_KEY" ]]; then
+            print_error "Datadog API key is required"
+            exit 1
+        fi
+        
+        # Create the secret
+        kubectl create secret generic datadog-api-key \
+            --from-literal=api-key="$DD_API_KEY" \
+            --namespace=default
+        
+        print_status "Datadog API key secret created successfully"
+    fi
 fi
 
 # Deploy to Kubernetes
@@ -124,6 +158,10 @@ echo "  • View collector logs: kubectl logs -l app=sample-app -c otel-collecto
 echo "  • View load generator logs: kubectl logs -l app=load-generator"
 echo "  • Port forward app: kubectl port-forward service/sample-app-service 8080:80"
 echo "  • Port forward collector metrics: kubectl port-forward service/sample-app-service 8888:8888"
+echo ""
+print_status "Deployment options:"
+echo "  • Deploy without API key prompt: $0 -N"
+echo "  • Show help: $0 -h"
 
 echo ""
 print_status "Testing endpoints:"
