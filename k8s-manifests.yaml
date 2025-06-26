@@ -42,9 +42,9 @@ data:
           - key: service.namespace
             value: "default"
             action: upsert
-          - key: host.name
-            from_attribute: k8s.node.name
-            action: upsert
+          # - key: host.name
+          #   from_attribute: k8s.node.name
+          #   action: upsert
           # - key: datadog.host.use_as_metadata
           #   value: true
           #   action: upsert
@@ -87,19 +87,19 @@ data:
         # Traces pipeline
         traces:
           receivers: [otlp]
-          processors: [memory_limiter, resourcedetection, resource, batch]
+          processors: [memory_limiter, resource, batch]
           exporters: [datadog, datadog/connector, debug]
         
         # Metrics pipeline
         metrics:
           receivers: [otlp, prometheus, datadog/connector]
-          processors: [memory_limiter, resourcedetection, resource, batch]
+          processors: [memory_limiter, resource, batch]
           exporters: [datadog, debug]
         
         # Logs pipeline
         logs:
           receivers: [otlp]
-          processors: [memory_limiter, resourcedetection, resource, batch]
+          processors: [memory_limiter, resource, batch]
           exporters: [datadog, debug]
 
       extensions: [health_check]
