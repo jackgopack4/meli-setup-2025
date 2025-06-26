@@ -69,6 +69,7 @@ data:
           key: ${DD_API_KEY}
         host_metadata:
           enabled: false
+        hostname: ${env:K8s_NODE_NAME}
 
       # Debug exporter for troubleshooting
       debug:
@@ -84,11 +85,11 @@ data:
         traces:
           receivers: [otlp]
           processors: [memory_limiter, resourcedetection, resource, batch]
-          exporters: [datadog, debug]
+          exporters: [datadog, datadog/connector, debug]
         
         # Metrics pipeline
         metrics:
-          receivers: [otlp, prometheus]
+          receivers: [otlp, prometheus, datadog/connector]
           processors: [memory_limiter, resourcedetection, resource, batch]
           exporters: [datadog, debug]
         
