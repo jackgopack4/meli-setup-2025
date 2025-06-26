@@ -72,7 +72,7 @@ data:
           key: ${DD_API_KEY}
         host_metadata:
           enabled: false
-        # hostname: ${env:K8s_NODE_NAME}
+        hostname: ${env:K8s_NODE_NAME}
 
       # Debug exporter for troubleshooting
       debug:
