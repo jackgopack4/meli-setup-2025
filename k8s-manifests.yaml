@@ -84,11 +84,11 @@ data:
         traces:
           receivers: [otlp]
           processors: [memory_limiter, resourcedetection, resource, batch]
-          exporters: [datadog, datadog/connector, debug]
+          exporters: [datadog, debug]
         
         # Metrics pipeline
         metrics:
-          receivers: [otlp, prometheus, datadog/connector]
+          receivers: [otlp, prometheus]
           processors: [memory_limiter, resourcedetection, resource, batch]
           exporters: [datadog, debug]
         
