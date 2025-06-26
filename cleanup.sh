@@ -51,6 +51,7 @@ fi
 
 # Wait for pods to be terminated
 print_status "Waiting for pods to terminate..."
+kubectl wait --for=delete pod -l app=datadog-agent --timeout=60s 2>/dev/null || true
 kubectl wait --for=delete pod -l app=sample-app --timeout=60s 2>/dev/null || true
 kubectl wait --for=delete pod -l app=load-generator --timeout=60s 2>/dev/null || true
 

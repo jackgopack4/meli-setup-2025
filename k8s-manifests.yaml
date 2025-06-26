@@ -312,3 +312,300 @@ spec:
     targetPort: 8080
     protocol: TCP
   type: LoadBalancer 
+
+---
+# ServiceAccount for Datadog Agent
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: datadog-agent
+  namespace: default
+
+---
+# ClusterRole for Datadog Agent with official permissions
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: datadog-agent
+rules:
+- apiGroups: [""]
+  resources:
+    - services
+    - events
+    - endpoints
+    - pods
+    - nodes
+    - componentstatuses
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources:
+    - configmaps
+  resourceNames: ["datadogtoken", "datadog-leader-election"]  # Kubernetes event collection state and leader election
+  verbs: ["get", "update"]
+- apiGroups: [""]
+  resources:
+    - configmaps
+  verbs: ["create"]
+- apiGroups: ["quota.openshift.io"]
+  resources:
+    - clusterresourcequotas
+  verbs: ["get", "list"]
+- apiGroups: ["autoscaling"]
+  resources:
+    - horizontalpodautoscalers
+  verbs: ["list", "watch"]
+- apiGroups: ["batch"]
+  resources:
+    - cronjobs
+    - jobs
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["extensions", "apps"]
+  resources:
+    - deployments
+    - replicasets
+    - daemonsets
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["policy"]
+  resources:
+    - podsecuritypolicies
+  verbs: ["use"]
+  resourceNames:
+    - datadog-agent
+- apiGroups: ["networking.k8s.io"]
+  resources:
+    - networkpolicies
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["coordination.k8s.io"]
+  resources:
+    - leases
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["metrics.k8s.io"]
+  resources:
+    - nodes
+    - pods
+  verbs: ["get", "list"]
+- nonResourceURLs:
+    - "/version"
+    - "/healthz"
+  verbs: ["get"]
+
+---
+# ClusterRoleBinding for Datadog Agent
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: datadog-agent
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: datadog-agent
+subjects:
+- kind: ServiceAccount
+  name: datadog-agent
+  namespace: default
+
+---
+# Datadog Agent DaemonSet
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: datadog-agent
+  namespace: default
+  labels:
+    app: datadog-agent
+spec:
+  selector:
+    matchLabels:
+      app: datadog-agent
+  template:
+    metadata:
+      labels:
+        app: datadog-agent
+      name: datadog-agent
+    spec:
+      serviceAccountName: datadog-agent
+      containers:
+      - name: datadog-agent
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+        image: gcr.io/datadoghq/agent:7
+        ports:
+        - containerPort: 8125
+          name: dogstatsdport
+          protocol: UDP
+        - containerPort: 8126
+          name: traceport
+          protocol: TCP
+        env:
+        - name: DD_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: datadog-api-key
+              key: api-key
+        - name: DD_SITE
+          value: "datad0g.com"
+        - name: DD_HOSTNAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: DD_CLUSTER_NAME
+          value: "kind-meli-otel-test"
+        - name: KUBERNETES
+          value: "true"
+        - name: DD_KUBERNETES_KUBELET_HOST
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        - name: DD_COLLECT_KUBERNETES_EVENTS
+          value: "true"
+        - name: DD_LEADER_ELECTION
+          value: "true"
+        - name: DD_KUBERNETES_COLLECT_METADATA_TAGS
+          value: "false"
+        - name: DD_KUBERNETES_METADATA_TAG_UPDATE_FREQ
+          value: "60"
+        # APM Configuration
+        - name: DD_APM_ENABLED
+          value: "true"
+        - name: DD_APM_NON_LOCAL_TRAFFIC
+          value: "true"
+        - name: DD_APM_RECEIVER_PORT
+          value: "8126"
+        # Logs Configuration
+        - name: DD_LOGS_ENABLED
+          value: "true"
+        - name: DD_LOGS_CONFIG_CONTAINER_COLLECT_ALL
+          value: "true"
+        - name: DD_LOGS_CONFIG_K8S_CONTAINER_USE_FILE
+          value: "true"
+        - name: DD_CONTAINER_EXCLUDE_LOGS
+          value: "name:datadog-agent"
+        # DogStatsD Configuration
+        - name: DD_DOGSTATSD_NON_LOCAL_TRAFFIC
+          value: "true"
+        - name: DD_DOGSTATSD_PORT
+          value: "8125"
+        # Process Monitoring
+        - name: DD_PROCESS_AGENT_ENABLED
+          value: "true"
+        - name: DD_PROCESS_AGENT_CONTAINER_SOURCE
+          value: "kubelet"
+        # Health and Monitoring
+        - name: DD_HEALTH_PORT
+          value: "5555"
+        - name: DD_LOG_LEVEL
+          value: "INFO"
+        # Container Runtime (kind uses containerd)
+        - name: DD_CRI_SOCKET_PATH
+          value: /host/var/run/containerd/containerd.sock
+        - name: DOCKER_HOST
+          value: unix:///host/var/run/containerd/containerd.sock
+        # Kubelet Configuration
+        - name: DD_KUBELET_TLS_VERIFY
+          value: "false"
+        - name: DD_KUBERNETES_KUBELET_NODENAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        # Disable features that require special privileges or cluster agent in kind
+        - name: DD_SYSTEM_PROBE_ENABLED
+          value: "false"
+        - name: DD_SYSTEM_PROBE_NETWORK_ENABLED
+          value: "false"
+        - name: DD_REMOTE_CONFIGURATION_ENABLED
+          value: "false"
+        # Disable orchestrator explorer (requires cluster agent)
+        - name: DD_ORCHESTRATOR_EXPLORER_ENABLED
+          value: "false"
+        # Disable compliance monitoring
+        - name: DD_COMPLIANCE_CONFIG_ENABLED
+          value: "false"
+        # Disable Docker check (kind uses containerd)
+        - name: DD_ENABLE_CHECK_DOCKER
+          value: "false"
+        # Configure for kind environment
+        - name: DD_FORWARDER_TIMEOUT
+          value: "10"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "200m"
+        volumeMounts:
+        - name: dockersocketdir
+          mountPath: /host/var/run
+          mountPropagation: None
+          readOnly: true
+        - name: procdir
+          mountPath: /host/proc
+          mountPropagation: None
+          readOnly: true
+        - name: cgroups
+          mountPath: /host/sys/fs/cgroup
+          mountPropagation: None
+          readOnly: true
+        - name: pointerdir
+          mountPath: /opt/datadog-agent/run
+          mountPropagation: None
+        - name: logpodpath
+          mountPath: /var/log/pods
+          mountPropagation: None
+          readOnly: true
+        - name: logcontainerpath
+          mountPath: /var/lib/docker/containers
+          mountPropagation: None
+          readOnly: true
+        - name: passwd
+          mountPath: /etc/passwd
+          readOnly: true
+        livenessProbe:
+          httpGet:
+            path: /live
+            port: 5555
+            scheme: HTTP
+          initialDelaySeconds: 15
+          periodSeconds: 15
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 6
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 5555
+            scheme: HTTP
+          initialDelaySeconds: 15
+          periodSeconds: 15
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 6
+
+      volumes:
+      - name: dockersocketdir
+        hostPath:
+          path: /var/run
+      - name: procdir
+        hostPath:
+          path: /proc
+      - name: cgroups
+        hostPath:
+          path: /sys/fs/cgroup
+      - name: pointerdir
+        hostPath:
+          path: /opt/datadog-agent/run
+      - name: logpodpath
+        hostPath:
+          path: /var/log/pods
+      - name: logcontainerpath
+        hostPath:
+          path: /var/lib/docker/containers
+      - name: passwd
+        hostPath:
+          path: /etc/passwd
+      tolerations:
+      - operator: Exists
+      hostNetwork: true
+      hostPID: true
+      restartPolicy: Always
